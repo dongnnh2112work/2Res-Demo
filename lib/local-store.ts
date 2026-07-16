@@ -1,6 +1,8 @@
 import { randomUUID } from "crypto";
 import { MAX_DISPLAY_WISHES, type EventPhase, type EventState, type Wish } from "@/lib/types";
 
+export { isLocalDataMode } from "@/lib/data-mode";
+
 const globalStore = globalThis as typeof globalThis & {
   __wishWallStore?: {
     wishes: Wish[];
@@ -20,15 +22,6 @@ function store() {
     };
   }
   return globalStore.__wishWallStore;
-}
-
-export function isLocalDataMode() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  return (
-    process.env.USE_LOCAL_STORE === "true" ||
-    !url ||
-    url.includes("placeholder")
-  );
 }
 
 export function listWishes(): Wish[] {

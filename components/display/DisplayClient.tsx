@@ -31,6 +31,7 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
   const [phase, setPhase] = useState<EventPhase>("collecting");
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
+  const [bootError, setBootError] = useState<string | null>(null);
   const revealing = useRef(false);
   const phaseRef = useRef<EventPhase>(phase);
   phaseRef.current = phase;
@@ -78,7 +79,17 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
     let channel: ReturnType<ReturnType<typeof createBrowserClient>["channel"]> | null =
       null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
-    const supabase = localMode ? null : createBrowserClient();
+    let supabase: ReturnType<typeof createBrowserClient> | null = null;
+
+    if (!localMode) {
+      try {
+        supabase = createBrowserClient();
+      } catch (err) {
+        setBootError(err instanceof Error ? err.message : "Missing Supabase env");
+        setReady(true);
+        return;
+      }
+    }
 
     async function bootLocal() {
       async function refresh() {
@@ -103,19 +114,32 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
     async function bootSupabase() {
       if (!supabase) return;
 
-      const [{ data: wishRows }, { data: stateRow }] = await Promise.all([
-        supabase
-          .from("wishes")
-          .select("id, message, author, created_at")
-          .order("created_at", { ascending: false })
-          .limit(MAX_DISPLAY_WISHES),
-        supabase.from("event_state").select("phase").eq("id", "main").single(),
-      ]);
+      try {
+        const [{ data: wishRows, error: wishErr }, { data: stateRow, error: stateErr }] =
+          await Promise.all([
+            supabase
+              .from("wishes")
+              .select("id, message, author, created_at")
+              .order("created_at", { ascending: false })
+              .limit(MAX_DISPLAY_WISHES),
+            supabase.from("event_state").select("phase").eq("id", "main").single(),
+          ]);
 
-      if (cancelled) return;
-      if (wishRows) setWishes([...wishRows].reverse());
-      if (stateRow?.phase) setPhase(stateRow.phase as EventPhase);
-      setReady(true);
+        if (cancelled) return;
+        if (wishErr || stateErr) {
+          setBootError(wishErr?.message || stateErr?.message || "Supabase query failed");
+          setReady(true);
+          return;
+        }
+        if (wishRows) setWishes([...wishRows].reverse());
+        if (stateRow?.phase) setPhase(stateRow.phase as EventPhase);
+        setReady(true);
+      } catch (err) {
+        if (cancelled) return;
+        setBootError(err instanceof Error ? err.message : "Failed to connect Supabase");
+        setReady(true);
+        return;
+      }
 
       channel = supabase
         .channel("display-realtime")
@@ -251,8 +275,13 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         <p className="display-brand">2Res Demo</p>
         <p className="display-meta">
           {wishes.length} lời chúc · {phase}
-          {localMode ? " · local" : ""}
+          {localMode ? " · local" : " · supabase"}
         </p>
+        {bootError ? (
+          <p className="display-meta" style={{ color: "#ffb4a8", maxWidth: 420 }}>
+            {bootError}
+          </p>
+        ) : null}
       </div>
 
       <div className="display-actions">
