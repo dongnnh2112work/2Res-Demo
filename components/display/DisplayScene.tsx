@@ -302,42 +302,46 @@ function usePhaseTimeline(phase: EventPhase, onConvergeComplete: () => void) {
   const prevPhase = useRef<EventPhase | null>(null);
   const phaseRef = useRef(phase);
   const onCompleteRef = useRef(onConvergeComplete);
+  // Cap delta so a tab hitch can't jump the whole animation
+  const MAX_DELTA = 1 / 20;
   phaseRef.current = phase;
   onCompleteRef.current = onConvergeComplete;
 
   useEffect(() => {
     const prev = prevPhase.current;
+    if (prev === phase) return;
     prevPhase.current = phase;
 
-    // Only reset when ENTERING a phase — avoids restart loops from re-renders
-    if (phase === "converging" && prev !== "converging") {
+    // Only reset when ENTERING a phase — never on identical re-sets
+    if (phase === "converging") {
       convergeRef.current = 0;
       revealRef.current = 0;
       done.current = false;
-    } else if (phase === "collecting" && prev !== "collecting") {
+    } else if (phase === "collecting") {
       convergeRef.current = 0;
       revealRef.current = 0;
       done.current = false;
-    } else if (phase === "revealed" && prev !== "revealed") {
-      convergeRef.current = 1;
-      revealRef.current = 0;
     } else if (phase === "revealed") {
       convergeRef.current = 1;
+      // Continue reveal from 0 only when coming from converge; hold if already revealing
+      if (prev !== "revealed") {
+        revealRef.current = 0;
+      }
     }
   }, [phase]);
 
   useFrame((_, delta) => {
+    const dt = Math.min(delta, MAX_DELTA);
     const current = phaseRef.current;
     if (current === "converging") {
-      convergeRef.current = Math.min(1, convergeRef.current + delta / CONVERGE_SECS);
+      convergeRef.current = Math.min(1, convergeRef.current + dt / CONVERGE_SECS);
       if (convergeRef.current >= 1 && !done.current) {
         done.current = true;
         onCompleteRef.current();
       }
     } else if (current === "revealed") {
-      // Advance once then hold at 1 — KV stays on screen
       if (revealRef.current < 1) {
-        revealRef.current = Math.min(1, revealRef.current + delta / REVEAL_SECS);
+        revealRef.current = Math.min(1, revealRef.current + dt / REVEAL_SECS);
       }
     }
   });

@@ -12,6 +12,12 @@ type DisplayClientProps = {
   secret: string;
 };
 
+const PHASE_RANK: Record<EventPhase, number> = {
+  collecting: 0,
+  converging: 1,
+  revealed: 2,
+};
+
 function mergeWish(prev: Wish[], row: Wish) {
   if (prev.some((w) => w.id === row.id)) return prev;
   const next = [...prev, row];
@@ -28,7 +34,44 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
   const revealing = useRef(false);
   const phaseRef = useRef<EventPhase>(phase);
   phaseRef.current = phase;
+  /** Ignore stale remote phase while a local trigger is in flight / animating */
+  const phaseLockUntil = useRef(0);
+  const lockedPhase = useRef<EventPhase | null>(null);
   const localMode = isLocalDataModeClient();
+
+  const applyRemotePhase = useCallback((next: EventPhase) => {
+    const now = Date.now();
+    const current = phaseRef.current;
+    if (next === current) return;
+
+    // While locked, only accept confirmation of the locked phase (or forward progress)
+    if (now < phaseLockUntil.current && lockedPhase.current) {
+      const locked = lockedPhase.current;
+      if (next === locked) {
+        lockedPhase.current = null;
+        phaseLockUntil.current = 0;
+        setPhase(next);
+        return;
+      }
+      // Stale "collecting" while we already started converging/revealed — ignore
+      if (PHASE_RANK[next] < PHASE_RANK[locked]) return;
+      if (PHASE_RANK[next] < PHASE_RANK[current]) return;
+    }
+
+    // Never go backwards in the sequence from remote alone
+    if (PHASE_RANK[next] < PHASE_RANK[current]) return;
+    // Don't restart converge after reveal
+    if (current === "revealed" && next === "converging") return;
+
+    setPhase(next);
+  }, []);
+
+  const applyLocalPhase = useCallback((next: EventPhase, lockMs = 8000) => {
+    lockedPhase.current = next;
+    phaseLockUntil.current = Date.now() + lockMs;
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -47,7 +90,9 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         const stateJson = await stateRes.json();
         if (cancelled) return;
         if (Array.isArray(wishesJson.wishes)) setWishes(wishesJson.wishes);
-        if (stateJson.state?.phase) setPhase(stateJson.state.phase as EventPhase);
+        if (stateJson.state?.phase) {
+          applyRemotePhase(stateJson.state.phase as EventPhase);
+        }
         setReady(true);
       }
 
@@ -98,29 +143,10 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
           { event: "UPDATE", schema: "public", table: "event_state" },
           (payload) => {
             const nextPhase = (payload.new as { phase?: EventPhase }).phase;
-            if (!nextPhase) return;
-            // Don't regress from revealed/converging due to stale realtime replay
-            const current = phaseRef.current;
-            if (current === "revealed" && nextPhase === "converging") return;
-            setPhase(nextPhase);
+            if (nextPhase) applyRemotePhase(nextPhase);
           },
         )
         .subscribe();
-
-      // Lightweight phase poll — Realtime can drop UPDATE events on some deploys
-      pollTimer = setInterval(async () => {
-        if (cancelled || !supabase) return;
-        const { data } = await supabase
-          .from("event_state")
-          .select("phase")
-          .eq("id", "main")
-          .single();
-        if (cancelled || !data?.phase) return;
-        const nextPhase = data.phase as EventPhase;
-        const current = phaseRef.current;
-        if (current === "revealed" && nextPhase === "converging") return;
-        if (nextPhase !== current) setPhase(nextPhase);
-      }, 2500);
     }
 
     if (localMode) {
@@ -136,13 +162,13 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         void supabase.removeChannel(channel);
       }
     };
-  }, [localMode]);
+  }, [localMode, applyRemotePhase]);
 
   const triggerPhase = useCallback(
     async (next: EventPhase) => {
+      // Switch UI/animation immediately — never wait for network
+      applyLocalPhase(next);
       setBusy(true);
-      // Optimistic — don't wait for Realtime or animation will stall / retrigger
-      setPhase(next);
       try {
         const res = await fetch("/api/trigger", {
           method: "POST",
@@ -158,12 +184,14 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         setBusy(false);
       }
     },
-    [secret],
+    [secret, applyLocalPhase],
   );
 
   const clearWishes = useCallback(async () => {
     if (busy) return;
     setBusy(true);
+    applyLocalPhase("collecting");
+    revealing.current = false;
     try {
       const res = await fetch("/api/wishes/clear", {
         method: "POST",
@@ -176,24 +204,36 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         return;
       }
       setWishes([]);
-      setPhase("collecting");
-      revealing.current = false;
     } finally {
       setBusy(false);
     }
-  }, [secret, busy]);
+  }, [secret, busy, applyLocalPhase]);
 
   const onConvergeComplete = useCallback(() => {
     if (revealing.current) return;
     if (phaseRef.current === "revealed") return;
     revealing.current = true;
-    void triggerPhase("revealed");
-  }, [triggerPhase]);
+    // Local only first — keep animation smooth; persist in background
+    applyLocalPhase("revealed");
+    void fetch("/api/trigger", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ secret, phase: "revealed" }),
+    }).then(async (res) => {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        console.error("Reveal persist failed", data);
+      }
+    });
+  }, [secret, applyLocalPhase]);
 
   useEffect(() => {
     if (phase === "collecting") revealing.current = false;
     if (phase === "revealed") revealing.current = true;
   }, [phase]);
+
+  const canActivate =
+    phase === "collecting" && !busy && wishes.length > 0 && ready;
 
   return (
     <div className="display-root">
@@ -229,13 +269,14 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
           <button
             type="button"
             className="display-trigger"
-            disabled={busy || wishes.length === 0}
+            disabled={!canActivate}
             onClick={() => {
+              if (!canActivate) return;
               revealing.current = false;
               void triggerPhase("converging");
             }}
           >
-            {busy ? "…" : "Kích hoạt"}
+            Kích hoạt
           </button>
         )}
 
