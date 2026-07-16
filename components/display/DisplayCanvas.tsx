@@ -14,8 +14,9 @@ export default function DisplayCanvas({ wishes, phase, onConvergeComplete }: Pro
   return (
     <Canvas
       camera={{ position: [0, 0, 11], fov: 50 }}
-      dpr={[1, 1.75]}
-      gl={{ antialias: true, alpha: false }}
+      dpr={[1, 1.5]}
+      gl={{ antialias: true, alpha: false, powerPreference: "high-performance" }}
+      frameloop="always"
     >
       <DisplayScene wishes={wishes} phase={phase} onConvergeComplete={onConvergeComplete} />
     </Canvas>

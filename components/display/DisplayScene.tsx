@@ -435,7 +435,8 @@ export default function DisplayScene({
   return (
     <>
       <color attach="background" args={["#05070d"]} />
-      <fog attach="fog" args={["#05070d", 14, 30]} />
+      {/* Fog starts farther so floating wishes don't fade in/out with tiny Z drift */}
+      <fog attach="fog" args={["#05070d", 22, 40]} />
       <ambientLight intensity={1} />
       <pointLight position={[0, 2, 6]} intensity={1.4} color="#ffd9a0" />
       <pointLight position={[-5, -1, 3]} intensity={0.6} color="#7eb6ff" />

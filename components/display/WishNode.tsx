@@ -68,11 +68,12 @@ function createWishTexture(message: string, author: string | null, tint: string)
   let y = height / 2 - blockHeight / 2 + lineHeight / 2;
 
   for (const line of lines) {
+    // Soft glow once in the texture — no animated opacity later
     ctx.shadowColor = tint;
-    ctx.shadowBlur = 36;
+    ctx.shadowBlur = 28;
     ctx.fillStyle = tint;
     ctx.fillText(line, width / 2, y);
-    ctx.shadowBlur = 14;
+    ctx.shadowBlur = 8;
     ctx.fillStyle = "#fff8e8";
     ctx.fillText(line, width / 2, y);
     y += lineHeight;
@@ -81,14 +82,17 @@ function createWishTexture(message: string, author: string | null, tint: string)
   if (author) {
     ctx.font = "400 28px 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif";
     ctx.shadowColor = tint;
-    ctx.shadowBlur = 18;
-    ctx.fillStyle = "rgba(255, 236, 200, 0.9)";
+    ctx.shadowBlur = 12;
+    ctx.fillStyle = "rgba(255, 236, 200, 0.92)";
     ctx.fillText(`— ${author}`, width / 2, y + 8);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.needsUpdate = true;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.generateMipmaps = false;
   return texture;
 }
 
@@ -106,19 +110,20 @@ export default function WishNode({
   phaseRef.current = phase;
   const seed = useMemo(() => hashSeed(wish.id), [wish.id]);
 
+  // Fixed Z per wish — moving Z + transparent planes = LED flicker from depth sorting
   const home = useMemo(() => {
-    const x = (seededRand(seed, 1) - 0.5) * 14;
-    const y = (seededRand(seed, 2) - 0.5) * 7.5;
-    const z = (seededRand(seed, 3) - 0.5) * 4;
+    const x = (seededRand(seed, 1) - 0.5) * 13;
+    const y = (seededRand(seed, 2) - 0.5) * 7;
+    const z = (seededRand(seed, 3) - 0.5) * 1.2;
     return new THREE.Vector3(x, y, z);
   }, [seed]);
 
   const floatAmp = useMemo(
     () => ({
-      x: 0.25 + seededRand(seed, 4) * 0.45,
-      y: 0.35 + seededRand(seed, 5) * 0.55,
-      z: 0.15 + seededRand(seed, 6) * 0.3,
-      speed: 0.4 + seededRand(seed, 7) * 0.5,
+      // Gentle drift only on X/Y — never hide, never pulse opacity
+      x: 0.12 + seededRand(seed, 4) * 0.18,
+      y: 0.16 + seededRand(seed, 5) * 0.22,
+      speed: 0.18 + seededRand(seed, 7) * 0.16,
       phase: seededRand(seed, 8) * Math.PI * 2,
     }),
     [seed],
@@ -149,16 +154,16 @@ export default function WishNode({
     const currentPhase = phaseRef.current;
 
     if (currentPhase === "collecting") {
+      // Soft float — position only, Z locked, scale/opacity constant
       group.current.position.set(
         home.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x,
-        home.y + Math.cos(t * floatAmp.speed * 0.85 + floatAmp.phase) * floatAmp.y,
-        home.z + Math.sin(t * floatAmp.speed * 0.55 + floatAmp.phase) * floatAmp.z,
+        home.y + Math.cos(t * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y,
+        home.z,
       );
-      group.current.rotation.z = Math.sin(t * 0.25 + floatAmp.phase) * 0.04;
-      group.current.scale.setScalar(0.98 + Math.sin(t * floatAmp.speed + floatAmp.phase) * 0.02);
+      group.current.rotation.z = Math.sin(t * 0.15 + floatAmp.phase) * 0.02;
+      group.current.scale.setScalar(1);
       group.current.visible = true;
-      // Keep opacity stable — strong pulsing looked like text blinking on LED
-      if (mat.current) mat.current.opacity = 0.92;
+      if (mat.current) mat.current.opacity = 1;
       return;
     }
 
@@ -174,25 +179,30 @@ export default function WishNode({
       const spark = Math.max(0.04, 1 - ease * 0.96);
       group.current.scale.setScalar(spark);
       group.current.rotation.z = ease * Math.PI * 1.5;
-      group.current.visible = ease < 0.97;
-
-      if (mat.current) mat.current.opacity = Math.max(0.35, 1 - ease * 0.2);
+      // Stay visible until nearly absorbed — fade opacity only at the very end
+      group.current.visible = true;
+      if (mat.current) mat.current.opacity = ease < 0.9 ? 1 : Math.max(0, 1 - (ease - 0.9) / 0.1);
       return;
     }
 
+    // revealed: hide wishes (KV takes over) — only after activate completes
     group.current.visible = false;
   });
 
   return (
-    <group ref={group} position={home.toArray()}>
-      <mesh>
+    <group ref={group} position={home.toArray()} renderOrder={index}>
+      <mesh renderOrder={index}>
         <planeGeometry args={[3.4, 1.42]} />
         <meshBasicMaterial
           ref={mat}
           map={texture}
           transparent
+          opacity={1}
           depthWrite={false}
+          depthTest
           toneMapped={false}
+          // Cuts empty canvas pixels out of sort fights → less LED flicker
+          alphaTest={0.08}
         />
       </mesh>
     </group>
