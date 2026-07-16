@@ -1,6 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  type MutableRefObject,
+} from "react";
 import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
@@ -28,7 +34,6 @@ function easeInOutCubic(t: number) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
-/** Soft radial glow disc (canvas) for additive bloom layers */
 function makeGlowTexture() {
   const size = 256;
   const canvas = document.createElement("canvas");
@@ -48,13 +53,13 @@ function makeGlowTexture() {
 }
 
 function CenterBurst({
-  convergeProgress,
-  revealProgress,
-  phase,
+  convergeProgressRef,
+  revealProgressRef,
+  phaseRef,
 }: {
-  convergeProgress: number;
-  revealProgress: number;
-  phase: EventPhase;
+  convergeProgressRef: MutableRefObject<number>;
+  revealProgressRef: MutableRefObject<number>;
+  phaseRef: MutableRefObject<EventPhase>;
 }) {
   const core = useRef<THREE.Mesh>(null);
   const halo = useRef<THREE.Mesh>(null);
@@ -66,6 +71,9 @@ function CenterBurst({
   useEffect(() => () => glowTex.dispose(), [glowTex]);
 
   useFrame(() => {
+    const phase = phaseRef.current;
+    const convergeProgress = convergeProgressRef.current;
+    const revealProgress = revealProgressRef.current;
     const active = phase === "converging" || phase === "revealed";
     if (!active) {
       if (core.current) core.current.visible = false;
@@ -76,19 +84,22 @@ function CenterBurst({
       return;
     }
 
-    // Build heat as wishes arrive (last 40% of converge = white-hot)
     const heat =
       phase === "converging"
         ? easeInCubic(Math.max(0, (convergeProgress - 0.45) / 0.55))
         : 1;
     const reveal = phase === "revealed" ? revealProgress : 0;
 
-    // Core pulse → peak at converge end
     if (core.current) {
       core.current.visible = true;
       const peak = phase === "converging" ? heat : Math.max(0, 1 - reveal * 1.4);
-      const s = 0.15 + heat * 2.8 + (phase === "converging" && heat > 0.85 ? (heat - 0.85) * 8 : 0);
-      core.current.scale.setScalar(Math.max(0.01, s * (phase === "revealed" ? 1 + reveal * 6 : 1)));
+      const s =
+        0.15 +
+        heat * 2.8 +
+        (phase === "converging" && heat > 0.85 ? (heat - 0.85) * 8 : 0);
+      core.current.scale.setScalar(
+        Math.max(0.01, s * (phase === "revealed" ? 1 + reveal * 6 : 1)),
+      );
       const mat = core.current.material as THREE.MeshBasicMaterial;
       mat.opacity = Math.min(1, 0.2 + peak * 0.95);
     }
@@ -101,7 +112,6 @@ function CenterBurst({
       mat.opacity = Math.min(0.85, heat * 0.55 + (1 - reveal) * reveal * 1.2);
     }
 
-    // Shockwave rings — fire at end of converge / start of reveal
     const waveT =
       phase === "converging"
         ? Math.max(0, (convergeProgress - 0.82) / 0.18)
@@ -121,7 +131,6 @@ function CenterBurst({
       mat.opacity = (1 - easeOutCubic(t2)) * 0.55;
     }
 
-    // Fullscreen white flash → washes into KV
     if (flash.current) {
       const flashIn =
         phase === "converging"
@@ -137,7 +146,9 @@ function CenterBurst({
             : flashIn;
       const opacity = phase === "converging" ? flashIn : Math.min(1, flashOut);
       flash.current.visible = opacity > 0.01;
-      flash.current.scale.setScalar(1 + (phase === "revealed" ? reveal * 0.4 : heat * 0.3));
+      flash.current.scale.setScalar(
+        1 + (phase === "revealed" ? reveal * 0.4 : heat * 0.3),
+      );
       const mat = flash.current.material as THREE.MeshBasicMaterial;
       mat.opacity = opacity;
     }
@@ -193,7 +204,6 @@ function CenterBurst({
           toneMapped={false}
         />
       </mesh>
-      {/* camera-facing flash plane big enough to wash LED */}
       <mesh ref={flash} position={[0, 0, 2]} visible={false}>
         <planeGeometry args={[40, 24]} />
         <meshBasicMaterial
@@ -210,11 +220,11 @@ function CenterBurst({
 }
 
 function KvUnveil({
-  visible,
-  revealProgress,
+  revealProgressRef,
+  phaseRef,
 }: {
-  visible: boolean;
-  revealProgress: number;
+  revealProgressRef: MutableRefObject<number>;
+  phaseRef: MutableRefObject<EventPhase>;
 }) {
   const group = useRef<THREE.Group>(null);
   const mat = useRef<THREE.MeshBasicMaterial>(null);
@@ -227,22 +237,30 @@ function KvUnveil({
 
   useFrame(() => {
     if (!group.current || !mat.current) return;
+    const visible = phaseRef.current === "revealed";
+    const revealProgress = revealProgressRef.current;
+
     if (!visible) {
       group.current.visible = false;
       mat.current.opacity = 0;
+      if (glowMat.current) glowMat.current.opacity = 0;
       return;
     }
 
-    // Hold dark until flash peaks (~0.28), then punch KV in hard
     const t = Math.max(0, (revealProgress - 0.28) / 0.55);
     const punch = easeOutCubic(Math.min(1, t));
-    const overshoot = punch < 1 ? 0.92 + punch * 0.16 : 1.02 - (revealProgress - 0.85) * 0.08;
+    // Settle to a stable scale once reveal finishes — no continuous drift
+    const overshoot =
+      punch < 1
+        ? 0.92 + punch * 0.16
+        : 1;
 
     group.current.visible = punch > 0.02;
     group.current.scale.setScalar(Math.max(0.2, overshoot));
     mat.current.opacity = punch;
     if (glowMat.current) {
-      glowMat.current.opacity = (1 - punch) * punch * 1.4 + punch * 0.25;
+      glowMat.current.opacity =
+        punch < 1 ? (1 - punch) * punch * 1.4 + punch * 0.25 : 0.12;
     }
   });
 
@@ -278,61 +296,63 @@ function KvUnveil({
 }
 
 function usePhaseTimeline(phase: EventPhase, onConvergeComplete: () => void) {
-  const [convergeProgress, setConvergeProgress] = useState(0);
-  const [revealProgress, setRevealProgress] = useState(0);
   const convergeRef = useRef(0);
   const revealRef = useRef(0);
   const done = useRef(false);
+  const prevPhase = useRef<EventPhase | null>(null);
+  const phaseRef = useRef(phase);
+  const onCompleteRef = useRef(onConvergeComplete);
+  phaseRef.current = phase;
+  onCompleteRef.current = onConvergeComplete;
 
   useEffect(() => {
-    if (phase === "converging") {
+    const prev = prevPhase.current;
+    prevPhase.current = phase;
+
+    // Only reset when ENTERING a phase — avoids restart loops from re-renders
+    if (phase === "converging" && prev !== "converging") {
       convergeRef.current = 0;
       revealRef.current = 0;
       done.current = false;
-      setConvergeProgress(0);
-      setRevealProgress(0);
-    } else if (phase === "collecting") {
+    } else if (phase === "collecting" && prev !== "collecting") {
       convergeRef.current = 0;
       revealRef.current = 0;
       done.current = false;
-      setConvergeProgress(0);
-      setRevealProgress(0);
-    } else if (phase === "revealed") {
-      // keep converge at 1, animate reveal
+    } else if (phase === "revealed" && prev !== "revealed") {
       convergeRef.current = 1;
-      setConvergeProgress(1);
-      if (revealRef.current <= 0) {
-        revealRef.current = 0;
-        setRevealProgress(0);
-      }
+      revealRef.current = 0;
+    } else if (phase === "revealed") {
+      convergeRef.current = 1;
     }
   }, [phase]);
 
   useFrame((_, delta) => {
-    if (phase === "converging") {
+    const current = phaseRef.current;
+    if (current === "converging") {
       convergeRef.current = Math.min(1, convergeRef.current + delta / CONVERGE_SECS);
-      setConvergeProgress(convergeRef.current);
       if (convergeRef.current >= 1 && !done.current) {
         done.current = true;
-        onConvergeComplete();
+        onCompleteRef.current();
       }
-    } else if (phase === "revealed") {
-      revealRef.current = Math.min(1, revealRef.current + delta / REVEAL_SECS);
-      setRevealProgress(revealRef.current);
+    } else if (current === "revealed") {
+      // Advance once then hold at 1 — KV stays on screen
+      if (revealRef.current < 1) {
+        revealRef.current = Math.min(1, revealRef.current + delta / REVEAL_SECS);
+      }
     }
   });
 
-  return { convergeProgress, revealProgress };
+  return { convergeRef, revealRef, phaseRef };
 }
 
 function WishCloud({
   wishes,
   phase,
-  convergeProgress,
+  convergeProgressRef,
 }: {
   wishes: Wish[];
   phase: EventPhase;
-  convergeProgress: number;
+  convergeProgressRef: MutableRefObject<number>;
 }) {
   return (
     <>
@@ -342,14 +362,22 @@ function WishCloud({
           wish={wish}
           index={index}
           phase={phase}
-          convergeProgress={convergeProgress}
+          convergeProgressRef={convergeProgressRef}
         />
       ))}
     </>
   );
 }
 
-function AmbientDust({ dim }: { dim: number }) {
+function AmbientDust({
+  phaseRef,
+  revealProgressRef,
+  convergeProgressRef,
+}: {
+  phaseRef: MutableRefObject<EventPhase>;
+  revealProgressRef: MutableRefObject<number>;
+  convergeProgressRef: MutableRefObject<number>;
+}) {
   const points = useRef<THREE.Points>(null);
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -367,6 +395,13 @@ function AmbientDust({ dim }: { dim: number }) {
     if (!points.current) return;
     points.current.rotation.y = state.clock.elapsedTime * 0.02;
     const mat = points.current.material as THREE.PointsMaterial;
+    const phase = phaseRef.current;
+    const dim =
+      phase === "revealed"
+        ? easeInOutCubic(Math.min(1, revealProgressRef.current * 1.4))
+        : phase === "converging"
+          ? easeInCubic(convergeProgressRef.current) * 0.4
+          : 0;
     mat.opacity = 0.45 * (1 - dim);
   });
 
@@ -392,8 +427,10 @@ export default function DisplayScene({
   phase,
   onConvergeComplete,
 }: DisplaySceneProps) {
-  const { convergeProgress, revealProgress } = usePhaseTimeline(phase, onConvergeComplete);
-  const dim = phase === "revealed" ? easeInOutCubic(Math.min(1, revealProgress * 1.4)) : phase === "converging" ? easeInCubic(convergeProgress) * 0.4 : 0;
+  const { convergeRef, revealRef, phaseRef } = usePhaseTimeline(
+    phase,
+    onConvergeComplete,
+  );
 
   return (
     <>
@@ -403,15 +440,19 @@ export default function DisplayScene({
       <pointLight position={[0, 2, 6]} intensity={1.4} color="#ffd9a0" />
       <pointLight position={[-5, -1, 3]} intensity={0.6} color="#7eb6ff" />
 
-      <AmbientDust dim={dim} />
-      <WishCloud wishes={wishes} phase={phase} convergeProgress={convergeProgress} />
+      <AmbientDust
+        phaseRef={phaseRef}
+        revealProgressRef={revealRef}
+        convergeProgressRef={convergeRef}
+      />
+      <WishCloud wishes={wishes} phase={phase} convergeProgressRef={convergeRef} />
       <CenterBurst
-        phase={phase}
-        convergeProgress={convergeProgress}
-        revealProgress={revealProgress}
+        phaseRef={phaseRef}
+        convergeProgressRef={convergeRef}
+        revealProgressRef={revealRef}
       />
       <Suspense fallback={null}>
-        <KvUnveil visible={phase === "revealed"} revealProgress={revealProgress} />
+        <KvUnveil phaseRef={phaseRef} revealProgressRef={revealRef} />
       </Suspense>
     </>
   );

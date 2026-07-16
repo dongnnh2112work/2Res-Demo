@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type MutableRefObject } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EventPhase, Wish } from "@/lib/types";
@@ -9,7 +9,7 @@ type WishNodeProps = {
   wish: Wish;
   index: number;
   phase: EventPhase;
-  convergeProgress: number;
+  convergeProgressRef: MutableRefObject<number>;
 };
 
 function hashSeed(id: string) {
@@ -68,7 +68,6 @@ function createWishTexture(message: string, author: string | null, tint: string)
   let y = height / 2 - blockHeight / 2 + lineHeight / 2;
 
   for (const line of lines) {
-    // soft bloom behind glyphs only (no card/box)
     ctx.shadowColor = tint;
     ctx.shadowBlur = 36;
     ctx.fillStyle = tint;
@@ -93,11 +92,18 @@ function createWishTexture(message: string, author: string | null, tint: string)
   return texture;
 }
 
-export default function WishNode({ wish, index, phase, convergeProgress }: WishNodeProps) {
+export default function WishNode({
+  wish,
+  index,
+  phase,
+  convergeProgressRef,
+}: WishNodeProps) {
   const group = useRef<THREE.Group>(null);
   const mat = useRef<THREE.MeshBasicMaterial>(null);
   const startPos = useRef(new THREE.Vector3());
   const captured = useRef(false);
+  const phaseRef = useRef(phase);
+  phaseRef.current = phase;
   const seed = useMemo(() => hashSeed(wish.id), [wish.id]);
 
   const home = useMemo(() => {
@@ -140,37 +146,36 @@ export default function WishNode({ wish, index, phase, convergeProgress }: WishN
   useFrame((state) => {
     if (!group.current) return;
     const t = state.clock.elapsedTime;
+    const currentPhase = phaseRef.current;
 
-    if (phase === "collecting") {
+    if (currentPhase === "collecting") {
       group.current.position.set(
         home.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x,
         home.y + Math.cos(t * floatAmp.speed * 0.85 + floatAmp.phase) * floatAmp.y,
         home.z + Math.sin(t * floatAmp.speed * 0.55 + floatAmp.phase) * floatAmp.z,
       );
       group.current.rotation.z = Math.sin(t * 0.25 + floatAmp.phase) * 0.04;
-      group.current.scale.setScalar(0.95 + Math.sin(t * floatAmp.speed + floatAmp.phase) * 0.05);
+      group.current.scale.setScalar(0.98 + Math.sin(t * floatAmp.speed + floatAmp.phase) * 0.02);
       group.current.visible = true;
-      if (mat.current) mat.current.opacity = 0.85 + Math.sin(t * floatAmp.speed * 2 + floatAmp.phase) * 0.15;
+      // Keep opacity stable — strong pulsing looked like text blinking on LED
+      if (mat.current) mat.current.opacity = 0.92;
       return;
     }
 
-    if (phase === "converging") {
+    if (currentPhase === "converging") {
       if (!captured.current) {
         startPos.current.copy(group.current.position);
         captured.current = true;
       }
 
-      // Accelerate hard into the core
-      const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgress)));
+      const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgressRef.current)));
       group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), ease);
 
-      // Card collapses into a bright spark
       const spark = Math.max(0.04, 1 - ease * 0.96);
       group.current.scale.setScalar(spark);
       group.current.rotation.z = ease * Math.PI * 1.5;
       group.current.visible = ease < 0.97;
 
-      // Brighten as they near center
       if (mat.current) mat.current.opacity = Math.max(0.35, 1 - ease * 0.2);
       return;
     }

@@ -26,6 +26,8 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
   const [busy, setBusy] = useState(false);
   const [ready, setReady] = useState(false);
   const revealing = useRef(false);
+  const phaseRef = useRef<EventPhase>(phase);
+  phaseRef.current = phase;
   const localMode = isLocalDataModeClient();
 
   useEffect(() => {
@@ -33,6 +35,7 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
     let channel: ReturnType<ReturnType<typeof createBrowserClient>["channel"]> | null =
       null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
+    const supabase = localMode ? null : createBrowserClient();
 
     async function bootLocal() {
       async function refresh() {
@@ -53,7 +56,8 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
     }
 
     async function bootSupabase() {
-      const supabase = createBrowserClient();
+      if (!supabase) return;
+
       const [{ data: wishRows }, { data: stateRow }] = await Promise.all([
         supabase
           .from("wishes")
@@ -79,13 +83,44 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
         )
         .on(
           "postgres_changes",
+          { event: "DELETE", schema: "public", table: "wishes" },
+          (payload) => {
+            const id = (payload.old as { id?: string } | null)?.id;
+            if (!id) {
+              setWishes([]);
+              return;
+            }
+            setWishes((prev) => prev.filter((w) => w.id !== id));
+          },
+        )
+        .on(
+          "postgres_changes",
           { event: "UPDATE", schema: "public", table: "event_state" },
           (payload) => {
             const nextPhase = (payload.new as { phase?: EventPhase }).phase;
-            if (nextPhase) setPhase(nextPhase);
+            if (!nextPhase) return;
+            // Don't regress from revealed/converging due to stale realtime replay
+            const current = phaseRef.current;
+            if (current === "revealed" && nextPhase === "converging") return;
+            setPhase(nextPhase);
           },
         )
         .subscribe();
+
+      // Lightweight phase poll — Realtime can drop UPDATE events on some deploys
+      pollTimer = setInterval(async () => {
+        if (cancelled || !supabase) return;
+        const { data } = await supabase
+          .from("event_state")
+          .select("phase")
+          .eq("id", "main")
+          .single();
+        if (cancelled || !data?.phase) return;
+        const nextPhase = data.phase as EventPhase;
+        const current = phaseRef.current;
+        if (current === "revealed" && nextPhase === "converging") return;
+        if (nextPhase !== current) setPhase(nextPhase);
+      }, 2500);
     }
 
     if (localMode) {
@@ -97,9 +132,8 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
     return () => {
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
-      if (channel) {
-        const supabase = createBrowserClient();
-        supabase.removeChannel(channel);
+      if (channel && supabase) {
+        void supabase.removeChannel(channel);
       }
     };
   }, [localMode]);
@@ -107,6 +141,8 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
   const triggerPhase = useCallback(
     async (next: EventPhase) => {
       setBusy(true);
+      // Optimistic — don't wait for Realtime or animation will stall / retrigger
+      setPhase(next);
       try {
         const res = await fetch("/api/trigger", {
           method: "POST",
@@ -118,12 +154,11 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
           console.error("Trigger failed", data);
           return;
         }
-        if (localMode) setPhase(next);
       } finally {
         setBusy(false);
       }
     },
-    [secret, localMode],
+    [secret],
   );
 
   const clearWishes = useCallback(async () => {
@@ -150,12 +185,14 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
 
   const onConvergeComplete = useCallback(() => {
     if (revealing.current) return;
+    if (phaseRef.current === "revealed") return;
     revealing.current = true;
     void triggerPhase("revealed");
   }, [triggerPhase]);
 
   useEffect(() => {
     if (phase === "collecting") revealing.current = false;
+    if (phase === "revealed") revealing.current = true;
   }, [phase]);
 
   return (
@@ -193,7 +230,10 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
             type="button"
             className="display-trigger"
             disabled={busy || wishes.length === 0}
-            onClick={() => triggerPhase("converging")}
+            onClick={() => {
+              revealing.current = false;
+              void triggerPhase("converging");
+            }}
           >
             {busy ? "…" : "Kích hoạt"}
           </button>
@@ -204,7 +244,10 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
             type="button"
             className="display-reset"
             disabled={busy}
-            onClick={() => triggerPhase("collecting")}
+            onClick={() => {
+              revealing.current = false;
+              void triggerPhase("collecting");
+            }}
           >
             Reset
           </button>
