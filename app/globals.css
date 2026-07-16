@@ -1,0 +1,289 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0c1018;
+  --foreground: #f3efe6;
+  --gold: #d4b483;
+  --gold-bright: #f0d9a8;
+  --ink: #0a0d14;
+  --panel: rgba(18, 24, 36, 0.72);
+  --line: rgba(212, 180, 131, 0.28);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-display: var(--font-display);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+/* —— Wish page —— */
+.wish-page {
+  position: relative;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1.25rem 3rem;
+  overflow: hidden;
+}
+
+.wish-atmosphere {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 80% 55% at 50% -10%, rgba(212, 180, 131, 0.22), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(70, 110, 160, 0.18), transparent 50%),
+    radial-gradient(ellipse 50% 35% at 0% 80%, rgba(120, 60, 40, 0.16), transparent 45%),
+    linear-gradient(180deg, #101522 0%, #0a0d14 100%);
+  pointer-events: none;
+}
+
+.wish-shell {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 26rem);
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+}
+
+.wish-brand-name {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: clamp(2.6rem, 10vw, 3.4rem);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  color: var(--gold-bright);
+}
+
+.wish-headline {
+  margin: 0.55rem 0 0;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 1.05rem;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(243, 239, 230, 0.78);
+}
+
+.wish-sub {
+  margin: 0.75rem 0 0;
+  font-size: 0.95rem;
+  line-height: 1.55;
+  color: rgba(243, 239, 230, 0.62);
+  font-weight: 300;
+}
+
+.wish-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  backdrop-filter: blur(10px);
+}
+
+.wish-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.wish-field span {
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.wish-field textarea,
+.wish-field input {
+  width: 100%;
+  border: 1px solid rgba(243, 239, 230, 0.12);
+  background: rgba(8, 10, 16, 0.65);
+  color: var(--foreground);
+  font: inherit;
+  padding: 0.85rem 0.9rem;
+  resize: vertical;
+  outline: none;
+}
+
+.wish-field textarea:focus,
+.wish-field input:focus {
+  border-color: rgba(212, 180, 131, 0.55);
+}
+
+.wish-field em {
+  font-style: normal;
+  font-size: 0.75rem;
+  color: rgba(243, 239, 230, 0.45);
+  text-align: right;
+}
+
+.wish-submit {
+  margin-top: 0.35rem;
+  border: none;
+  background: linear-gradient(135deg, #e6c995, #b8924f);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  padding: 0.95rem 1rem;
+  cursor: pointer;
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+
+.wish-submit:hover:not(:disabled) {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.wish-submit:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.wish-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #ffb4a8;
+}
+
+.wish-thanks {
+  padding: 1.5rem 1.25rem;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  text-align: center;
+}
+
+.wish-thanks-label {
+  margin: 0;
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--gold);
+}
+
+.wish-thanks-title {
+  margin: 0.6rem 0 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 2.2rem;
+  font-weight: 600;
+  color: var(--gold-bright);
+}
+
+.wish-thanks-body {
+  margin: 0.7rem 0 0;
+  color: rgba(243, 239, 230, 0.65);
+  line-height: 1.5;
+}
+
+/* —— Display / LED —— */
+.display-root {
+  position: relative;
+  width: 100vw;
+  height: 100dvh;
+  overflow: hidden;
+  background: #05070d;
+}
+
+.display-root canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.display-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: rgba(243, 239, 230, 0.55);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-size: 0.8rem;
+}
+
+.display-chrome {
+  position: absolute;
+  top: 1.25rem;
+  left: 1.5rem;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.display-brand {
+  margin: 0;
+  font-family: var(--font-display), Georgia, serif;
+  font-size: 1.6rem;
+  color: rgba(240, 217, 168, 0.85);
+}
+
+.display-meta {
+  margin: 0.2rem 0 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: rgba(243, 239, 230, 0.4);
+  text-transform: uppercase;
+}
+
+.display-actions {
+  position: absolute;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 3;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.display-trigger,
+.display-reset,
+.display-clear {
+  position: static;
+  border: 1px solid rgba(243, 239, 230, 0.15);
+  background: rgba(10, 12, 18, 0.55);
+  color: rgba(243, 239, 230, 0.55);
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.55rem 0.8rem;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  opacity: 0.35;
+}
+
+.display-trigger:hover:not(:disabled),
+.display-reset:hover:not(:disabled),
+.display-clear:hover:not(:disabled) {
+  opacity: 0.9;
+  color: var(--gold-bright);
+  border-color: rgba(212, 180, 131, 0.45);
+}
+
+.display-trigger:disabled,
+.display-clear:disabled {
+  opacity: 0.15;
+  cursor: not-allowed;
+}
+
+.display-reset {
+  opacity: 0.4;
+}
