@@ -11,7 +11,7 @@ import { useFrame } from "@react-three/fiber";
 import { useTexture } from "@react-three/drei";
 import * as THREE from "three";
 import type { EventPhase, Wish } from "@/lib/types";
-import WishNode from "./WishNode";
+import WishNode, { layoutWishHomes } from "./WishNode";
 
 type DisplaySceneProps = {
   wishes: Wish[];
@@ -358,6 +358,8 @@ function WishCloud({
   phase: EventPhase;
   convergeProgressRef: MutableRefObject<number>;
 }) {
+  const homes = useMemo(() => layoutWishHomes(wishes.length), [wishes.length]);
+
   return (
     <>
       {wishes.map((wish, index) => (
@@ -365,6 +367,7 @@ function WishCloud({
           key={wish.id}
           wish={wish}
           index={index}
+          home={homes[index]!}
           phase={phase}
           convergeProgressRef={convergeProgressRef}
         />

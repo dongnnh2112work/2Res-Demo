@@ -5,12 +5,74 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import type { EventPhase, Wish } from "@/lib/types";
 
+export type WishHome = {
+  x: number;
+  y: number;
+  z: number;
+  baseScale: number;
+};
+
 type WishNodeProps = {
   wish: Wish;
   index: number;
   phase: EventPhase;
+  home: WishHome;
   convergeProgressRef: MutableRefObject<number>;
 };
+
+/** Plane size used for non-overlap layout (must match mesh geometry). */
+export const WISH_PLANE_W = 3.6;
+export const WISH_PLANE_H = 1.8;
+
+/**
+ * Pack wishes on a grid that fits the LED view so cards don't overlap
+ * (includes margin for the gentle float drift).
+ */
+export function layoutWishHomes(count: number): WishHome[] {
+  if (count <= 0) return [];
+
+  const floatPad = 0.4;
+  const gapX = 0.5;
+  const gapY = 0.4;
+  const cellW = WISH_PLANE_W + gapX + floatPad * 2;
+  const cellH = WISH_PLANE_H + gapY + floatPad * 2;
+
+  // Visible field roughly matching camera at z=11, fov 50
+  const viewW = 13.5;
+  const viewH = 7.6;
+
+  const aspect = viewW / viewH;
+  let cols = Math.max(1, Math.ceil(Math.sqrt(count * aspect)));
+  let rows = Math.ceil(count / cols);
+
+  while (cols > 1 && (cols - 1) * rows >= count) {
+    cols -= 1;
+    rows = Math.ceil(count / cols);
+  }
+
+  const needW = cols * cellW;
+  const needH = rows * cellH;
+  const fit = Math.min(1, viewW / needW, viewH / needH);
+  const stepX = cellW * fit;
+  const stepY = cellH * fit;
+  const baseScale = fit;
+
+  const homes: WishHome[] = [];
+  for (let i = 0; i < count; i++) {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    const rowCount = row === rows - 1 ? count - row * cols : cols;
+    const x =
+      rowCount < cols
+        ? (col - (rowCount - 1) / 2) * stepX
+        : (col - (cols - 1) / 2) * stepX;
+    const y = ((rows - 1) / 2 - row) * stepY;
+    const z = ((i % 7) - 3) * 0.05;
+    homes.push({ x, y, z, baseScale });
+  }
+
+  return homes;
+}
 
 function hashSeed(id: string) {
   let h = 0;
@@ -25,6 +87,10 @@ function seededRand(seed: number, salt: number) {
 
 function easeInCubic(t: number) {
   return t * t * t;
+}
+
+function easeOutCubic(t: number) {
+  return 1 - Math.pow(1 - t, 3);
 }
 
 function breakLongToken(
@@ -151,30 +217,26 @@ export default function WishNode({
   wish,
   index,
   phase,
+  home,
   convergeProgressRef,
 }: WishNodeProps) {
   const group = useRef<THREE.Group>(null);
   const mat = useRef<THREE.MeshBasicMaterial>(null);
   const startPos = useRef(new THREE.Vector3());
+  const startScale = useRef(1);
   const captured = useRef(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+  const homeRef = useRef(home);
+  homeRef.current = home;
   const seed = useMemo(() => hashSeed(wish.id), [wish.id]);
-
-  // Fixed Z per wish — moving Z + transparent planes = LED flicker from depth sorting
-  const home = useMemo(() => {
-    const x = (seededRand(seed, 1) - 0.5) * 13;
-    const y = (seededRand(seed, 2) - 0.5) * 7;
-    const z = (seededRand(seed, 3) - 0.5) * 1.2;
-    return new THREE.Vector3(x, y, z);
-  }, [seed]);
 
   const floatAmp = useMemo(
     () => ({
-      // Gentle drift only on X/Y — never hide, never pulse opacity
-      x: 0.12 + seededRand(seed, 4) * 0.18,
-      y: 0.16 + seededRand(seed, 5) * 0.22,
-      speed: 0.18 + seededRand(seed, 7) * 0.16,
+      // Keep drift smaller than layout padding so cards don't collide
+      x: 0.1 + seededRand(seed, 4) * 0.14,
+      y: 0.12 + seededRand(seed, 5) * 0.16,
+      speed: 0.16 + seededRand(seed, 7) * 0.14,
       phase: seededRand(seed, 8) * Math.PI * 2,
     }),
     [seed],
@@ -203,16 +265,17 @@ export default function WishNode({
     if (!group.current) return;
     const t = state.clock.elapsedTime;
     const currentPhase = phaseRef.current;
+    const h = homeRef.current;
+    const floatScale = Math.min(1, h.baseScale);
 
     if (currentPhase === "collecting") {
-      // Soft float — position only, no spin
       group.current.position.set(
-        home.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x,
-        home.y + Math.cos(t * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y,
-        home.z,
+        h.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x * floatScale,
+        h.y + Math.cos(t * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y * floatScale,
+        h.z,
       );
       group.current.rotation.set(0, 0, 0);
-      group.current.scale.setScalar(1);
+      group.current.scale.setScalar(h.baseScale);
       group.current.visible = true;
       if (mat.current) mat.current.opacity = 1;
       return;
@@ -221,32 +284,33 @@ export default function WishNode({
     if (currentPhase === "converging") {
       if (!captured.current) {
         startPos.current.copy(group.current.position);
+        startScale.current = group.current.scale.x;
         captured.current = true;
       }
 
       const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgressRef.current)));
-      // Straight flight to center — never rotate
+      // Straight flight to center — no spin
       group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), ease);
       group.current.rotation.set(0, 0, 0);
 
-      // Keep readable size while flying; shrink only at the end
-      const shrink = ease < 0.7 ? 1 : Math.max(0.12, 1 - ((ease - 0.7) / 0.3) * 0.88);
-      group.current.scale.setScalar(shrink);
+      // Far→near shrink: size falls with distance to center (smooth throughout)
+      const shrinkT = easeOutCubic(ease);
+      const scale = Math.max(0.06, startScale.current * (1 - shrinkT * 0.94));
+      group.current.scale.setScalar(scale);
       group.current.visible = true;
       if (mat.current) {
-        mat.current.opacity = ease < 0.85 ? 1 : Math.max(0, 1 - (ease - 0.85) / 0.15);
+        mat.current.opacity = ease < 0.88 ? 1 : Math.max(0, 1 - (ease - 0.88) / 0.12);
       }
       return;
     }
 
-    // revealed: hide wishes (KV takes over) — only after activate completes
     group.current.visible = false;
   });
 
   return (
-    <group ref={group} position={home.toArray()} renderOrder={index}>
+    <group ref={group} position={[home.x, home.y, home.z]} scale={home.baseScale} renderOrder={index}>
       <mesh renderOrder={index}>
-        <planeGeometry args={[3.6, 1.8]} />
+        <planeGeometry args={[WISH_PLANE_W, WISH_PLANE_H]} />
         <meshBasicMaterial
           ref={mat}
           map={texture}
@@ -255,7 +319,6 @@ export default function WishNode({
           depthWrite={false}
           depthTest
           toneMapped={false}
-          // Cuts empty canvas pixels out of sort fights → less LED flicker
           alphaTest={0.08}
         />
       </mesh>
