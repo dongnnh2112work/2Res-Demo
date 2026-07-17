@@ -48,18 +48,30 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, wish, mode: "local" });
     }
 
-    const supabase = createServiceClient();
-    const { data, error } = await supabase
-      .from("wishes")
-      .insert({ message, author })
-      .select("id, message, author, created_at")
-      .single();
+    try {
+      const supabase = createServiceClient();
+      const { data, error } = await supabase
+        .from("wishes")
+        .insert({ message, author })
+        .select("id, message, author, created_at")
+        .single();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+      }
+
+      return NextResponse.json({ ok: true, wish: data, mode: "supabase" });
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error:
+            err instanceof Error
+              ? err.message
+              : "Missing Supabase env on Vercel — set keys and Redeploy",
+        },
+        { status: 500 },
+      );
     }
-
-    return NextResponse.json({ ok: true, wish: data, mode: "supabase" });
   } catch {
     return NextResponse.json({ error: "Bad request" }, { status: 400 });
   }
