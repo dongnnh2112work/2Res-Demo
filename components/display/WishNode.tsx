@@ -205,13 +205,13 @@ export default function WishNode({
     const currentPhase = phaseRef.current;
 
     if (currentPhase === "collecting") {
-      // Soft float — position only, Z locked, scale/opacity constant
+      // Soft float — position only, no spin
       group.current.position.set(
         home.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x,
         home.y + Math.cos(t * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y,
         home.z,
       );
-      group.current.rotation.z = Math.sin(t * 0.15 + floatAmp.phase) * 0.02;
+      group.current.rotation.set(0, 0, 0);
       group.current.scale.setScalar(1);
       group.current.visible = true;
       if (mat.current) mat.current.opacity = 1;
@@ -225,14 +225,17 @@ export default function WishNode({
       }
 
       const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgressRef.current)));
-      // Fly straight to center — no spin
+      // Straight flight to center — never rotate
       group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), ease);
-      group.current.rotation.z = 0;
+      group.current.rotation.set(0, 0, 0);
 
-      const spark = Math.max(0.08, 1 - ease * 0.92);
-      group.current.scale.setScalar(spark);
+      // Keep readable size while flying; shrink only at the end
+      const shrink = ease < 0.7 ? 1 : Math.max(0.12, 1 - ((ease - 0.7) / 0.3) * 0.88);
+      group.current.scale.setScalar(shrink);
       group.current.visible = true;
-      if (mat.current) mat.current.opacity = ease < 0.88 ? 1 : Math.max(0, 1 - (ease - 0.88) / 0.12);
+      if (mat.current) {
+        mat.current.opacity = ease < 0.85 ? 1 : Math.max(0, 1 - (ease - 0.85) / 0.15);
+      }
       return;
     }
 
