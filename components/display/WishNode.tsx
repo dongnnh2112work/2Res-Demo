@@ -10,6 +10,8 @@ export type WishHome = {
   y: number;
   z: number;
   baseScale: number;
+  /** Radians — slight diagonal tilt while floating */
+  tilt: number;
 };
 
 type WishNodeProps = {
@@ -24,56 +26,6 @@ type WishNodeProps = {
 export const WISH_PLANE_W = 3.6;
 export const WISH_PLANE_H = 1.8;
 
-/**
- * Pack wishes on a grid that fits the LED view so cards don't overlap
- * (includes margin for the gentle float drift).
- */
-export function layoutWishHomes(count: number): WishHome[] {
-  if (count <= 0) return [];
-
-  const floatPad = 0.4;
-  const gapX = 0.5;
-  const gapY = 0.4;
-  const cellW = WISH_PLANE_W + gapX + floatPad * 2;
-  const cellH = WISH_PLANE_H + gapY + floatPad * 2;
-
-  // Visible field roughly matching camera at z=11, fov 50
-  const viewW = 13.5;
-  const viewH = 7.6;
-
-  const aspect = viewW / viewH;
-  let cols = Math.max(1, Math.ceil(Math.sqrt(count * aspect)));
-  let rows = Math.ceil(count / cols);
-
-  while (cols > 1 && (cols - 1) * rows >= count) {
-    cols -= 1;
-    rows = Math.ceil(count / cols);
-  }
-
-  const needW = cols * cellW;
-  const needH = rows * cellH;
-  const fit = Math.min(1, viewW / needW, viewH / needH);
-  const stepX = cellW * fit;
-  const stepY = cellH * fit;
-  const baseScale = fit;
-
-  const homes: WishHome[] = [];
-  for (let i = 0; i < count; i++) {
-    const col = i % cols;
-    const row = Math.floor(i / cols);
-    const rowCount = row === rows - 1 ? count - row * cols : cols;
-    const x =
-      rowCount < cols
-        ? (col - (rowCount - 1) / 2) * stepX
-        : (col - (cols - 1) / 2) * stepX;
-    const y = ((rows - 1) / 2 - row) * stepY;
-    const z = ((i % 7) - 3) * 0.05;
-    homes.push({ x, y, z, baseScale });
-  }
-
-  return homes;
-}
-
 function hashSeed(id: string) {
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
@@ -85,12 +37,95 @@ function seededRand(seed: number, salt: number) {
   return x - Math.floor(x);
 }
 
-function easeInCubic(t: number) {
-  return t * t * t;
+function rotatedHalfExtents(w: number, h: number, tilt: number) {
+  const c = Math.abs(Math.cos(tilt));
+  const s = Math.abs(Math.sin(tilt));
+  return {
+    hw: 0.5 * (w * c + h * s),
+    hh: 0.5 * (w * s + h * c),
+  };
 }
 
-function easeOutCubic(t: number) {
-  return 1 - Math.pow(1 - t, 3);
+function overlaps(
+  ax: number,
+  ay: number,
+  aTilt: number,
+  aScale: number,
+  bx: number,
+  by: number,
+  bTilt: number,
+  bScale: number,
+  pad: number,
+) {
+  const a = rotatedHalfExtents(WISH_PLANE_W * aScale, WISH_PLANE_H * aScale, aTilt);
+  const b = rotatedHalfExtents(WISH_PLANE_W * bScale, WISH_PLANE_H * bScale, bTilt);
+  return Math.abs(ax - bx) < a.hw + b.hw + pad && Math.abs(ay - by) < a.hh + b.hh + pad;
+}
+
+/**
+ * Scatter wishes randomly (with slight tilt). Shrinks scale until every card
+ * fits without overlapping, including float padding.
+ */
+export function layoutWishHomes(count: number): WishHome[] {
+  if (count <= 0) return [];
+
+  const viewW = 13.2;
+  const viewH = 7.4;
+  let baseScale = Math.min(1, 2.2 / Math.sqrt(Math.max(count, 1)));
+
+  for (let round = 0; round < 14; round++) {
+    const homes: WishHome[] = [];
+    const pad = 0.28 * baseScale + 0.2;
+    let failed = false;
+
+    for (let i = 0; i < count; i++) {
+      const seed = hashSeed(`scatter-${count}-${i}`);
+      const tilt = (seededRand(seed, 2) - 0.5) * 0.42; // ~±12°
+      const ext = rotatedHalfExtents(WISH_PLANE_W * baseScale, WISH_PLANE_H * baseScale, tilt);
+      const maxX = Math.max(0.2, viewW * 0.5 - ext.hw);
+      const maxY = Math.max(0.2, viewH * 0.5 - ext.hh);
+
+      let placed: WishHome | null = null;
+      for (let tryN = 0; tryN < 55; tryN++) {
+        const x = (seededRand(seed, 20 + tryN) - 0.5) * 2 * maxX;
+        const y = (seededRand(seed, 80 + tryN) - 0.5) * 2 * maxY;
+        const z = (seededRand(seed, 5) - 0.5) * 0.5;
+        const hit = homes.some((h) =>
+          overlaps(x, y, tilt, baseScale, h.x, h.y, h.tilt, h.baseScale, pad),
+        );
+        if (!hit) {
+          placed = { x, y, z, baseScale, tilt };
+          break;
+        }
+      }
+
+      if (!placed) {
+        failed = true;
+        break;
+      }
+      homes.push(placed);
+    }
+
+    if (!failed) return homes;
+    baseScale *= 0.86;
+  }
+
+  // Last resort: loose random with tiny cards
+  const tiny = Math.max(0.22, baseScale);
+  return Array.from({ length: count }, (_, i) => {
+    const seed = hashSeed(`fallback-${count}-${i}`);
+    return {
+      x: (seededRand(seed, 1) - 0.5) * 12,
+      y: (seededRand(seed, 2) - 0.5) * 6.5,
+      z: (seededRand(seed, 3) - 0.5) * 0.4,
+      baseScale: tiny,
+      tilt: (seededRand(seed, 4) - 0.5) * 0.35,
+    };
+  });
+}
+
+function easeInOutCubic(t: number) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
 function breakLongToken(
@@ -224,6 +259,7 @@ export default function WishNode({
   const mat = useRef<THREE.MeshBasicMaterial>(null);
   const startPos = useRef(new THREE.Vector3());
   const startScale = useRef(1);
+  const startTilt = useRef(0);
   const captured = useRef(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
@@ -233,10 +269,9 @@ export default function WishNode({
 
   const floatAmp = useMemo(
     () => ({
-      // Keep drift smaller than layout padding so cards don't collide
-      x: 0.1 + seededRand(seed, 4) * 0.14,
-      y: 0.12 + seededRand(seed, 5) * 0.16,
-      speed: 0.16 + seededRand(seed, 7) * 0.14,
+      x: 0.08 + seededRand(seed, 4) * 0.12,
+      y: 0.1 + seededRand(seed, 5) * 0.14,
+      speed: 0.14 + seededRand(seed, 7) * 0.12,
       phase: seededRand(seed, 8) * Math.PI * 2,
     }),
     [seed],
@@ -263,18 +298,19 @@ export default function WishNode({
 
   useFrame((state) => {
     if (!group.current) return;
-    const t = state.clock.elapsedTime;
+    const clock = state.clock.elapsedTime;
     const currentPhase = phaseRef.current;
     const h = homeRef.current;
     const floatScale = Math.min(1, h.baseScale);
 
     if (currentPhase === "collecting") {
       group.current.position.set(
-        h.x + Math.sin(t * floatAmp.speed + floatAmp.phase) * floatAmp.x * floatScale,
-        h.y + Math.cos(t * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y * floatScale,
+        h.x + Math.sin(clock * floatAmp.speed + floatAmp.phase) * floatAmp.x * floatScale,
+        h.y + Math.cos(clock * floatAmp.speed * 0.9 + floatAmp.phase) * floatAmp.y * floatScale,
         h.z,
       );
-      group.current.rotation.set(0, 0, 0);
+      // Keep the scattered diagonal tilt — no spinning
+      group.current.rotation.set(0, 0, h.tilt);
       group.current.scale.setScalar(h.baseScale);
       group.current.visible = true;
       if (mat.current) mat.current.opacity = 1;
@@ -285,21 +321,20 @@ export default function WishNode({
       if (!captured.current) {
         startPos.current.copy(group.current.position);
         startScale.current = group.current.scale.x;
+        startTilt.current = group.current.rotation.z;
         captured.current = true;
       }
 
-      const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgressRef.current)));
-      // Straight flight to center — no spin
-      group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), ease);
-      group.current.rotation.set(0, 0, 0);
+      // One shared progress → move + shrink happen together
+      const p = Math.min(1, Math.max(0, convergeProgressRef.current));
+      const t = easeInOutCubic(p);
 
-      // Far→near shrink: size falls with distance to center (smooth throughout)
-      const shrinkT = easeOutCubic(ease);
-      const scale = Math.max(0.06, startScale.current * (1 - shrinkT * 0.94));
-      group.current.scale.setScalar(scale);
+      group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), t);
+      group.current.rotation.set(0, 0, startTilt.current);
+      group.current.scale.setScalar(Math.max(0.05, startScale.current * (1 - t * 0.95)));
       group.current.visible = true;
       if (mat.current) {
-        mat.current.opacity = ease < 0.88 ? 1 : Math.max(0, 1 - (ease - 0.88) / 0.12);
+        mat.current.opacity = t < 0.9 ? 1 : Math.max(0, 1 - (t - 0.9) / 0.1);
       }
       return;
     }
@@ -308,7 +343,13 @@ export default function WishNode({
   });
 
   return (
-    <group ref={group} position={[home.x, home.y, home.z]} scale={home.baseScale} renderOrder={index}>
+    <group
+      ref={group}
+      position={[home.x, home.y, home.z]}
+      rotation={[0, 0, home.tilt]}
+      scale={home.baseScale}
+      renderOrder={index}
+    >
       <mesh renderOrder={index}>
         <planeGeometry args={[WISH_PLANE_W, WISH_PLANE_H]} />
         <meshBasicMaterial
