@@ -225,14 +225,14 @@ export default function WishNode({
       }
 
       const ease = easeInCubic(Math.min(1, Math.max(0, convergeProgressRef.current)));
+      // Fly straight to center — no spin
       group.current.position.lerpVectors(startPos.current, new THREE.Vector3(0, 0, 0), ease);
+      group.current.rotation.z = 0;
 
-      const spark = Math.max(0.04, 1 - ease * 0.96);
+      const spark = Math.max(0.08, 1 - ease * 0.92);
       group.current.scale.setScalar(spark);
-      group.current.rotation.z = ease * Math.PI * 1.5;
-      // Stay visible until nearly absorbed — fade opacity only at the very end
       group.current.visible = true;
-      if (mat.current) mat.current.opacity = ease < 0.9 ? 1 : Math.max(0, 1 - (ease - 0.9) / 0.1);
+      if (mat.current) mat.current.opacity = ease < 0.88 ? 1 : Math.max(0, 1 - (ease - 0.88) / 0.12);
       return;
     }
 
