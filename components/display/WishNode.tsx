@@ -27,30 +27,82 @@ function easeInCubic(t: number) {
   return t * t * t;
 }
 
+function breakLongToken(
+  ctx: CanvasRenderingContext2D,
+  token: string,
+  maxWidth: number,
+): string[] {
+  if (ctx.measureText(token).width <= maxWidth) return [token];
+
+  const chars = Array.from(token);
+  const parts: string[] = [];
+  let current = "";
+  for (const ch of chars) {
+    const test = current + ch;
+    if (ctx.measureText(test).width > maxWidth && current) {
+      parts.push(current);
+      current = ch;
+    } else {
+      current = test;
+    }
+  }
+  if (current) parts.push(current);
+  return parts;
+}
+
+function ellipsize(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  maxWidth: number,
+): string {
+  if (ctx.measureText(text).width <= maxWidth) return text;
+  let clipped = text;
+  while (clipped.length > 1 && ctx.measureText(`${clipped}…`).width > maxWidth) {
+    clipped = clipped.slice(0, -1);
+  }
+  return `${clipped}…`;
+}
+
 function wrapText(
   ctx: CanvasRenderingContext2D,
   text: string,
   maxWidth: number,
+  maxLines = 5,
 ): string[] {
-  const words = text.split(/\s+/);
+  const tokens = text.trim().split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = "";
-  for (const word of words) {
-    const test = line ? `${line} ${word}` : word;
-    if (ctx.measureText(test).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else {
-      line = test;
+
+  const flushOverflow = () => {
+    if (lines.length < maxLines) return false;
+    lines[maxLines - 1] = ellipsize(ctx, lines[maxLines - 1], maxWidth);
+    return true;
+  };
+
+  for (const token of tokens) {
+    for (const piece of breakLongToken(ctx, token, maxWidth)) {
+      const test = line ? `${line} ${piece}` : piece;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        lines.push(line);
+        line = piece;
+        if (flushOverflow()) return lines.slice(0, maxLines);
+      } else {
+        line = test;
+      }
     }
   }
-  if (line) lines.push(line);
-  return lines.slice(0, 4);
+
+  if (line) {
+    lines.push(line);
+    if (flushOverflow()) return lines.slice(0, maxLines);
+  }
+
+  return lines.slice(0, maxLines);
 }
 
 function createWishTexture(message: string, author: string | null, tint: string) {
   const width = 768;
-  const height = 320;
+  const height = 384;
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
@@ -58,17 +110,16 @@ function createWishTexture(message: string, author: string | null, tint: string)
 
   ctx.clearRect(0, 0, width, height);
 
-  ctx.font = "600 48px 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif";
+  ctx.font = "600 44px 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
-  const lines = wrapText(ctx, message, width - 80);
-  const lineHeight = 56;
-  const blockHeight = lines.length * lineHeight + (author ? 44 : 0);
+  const lines = wrapText(ctx, message, width - 72, 5);
+  const lineHeight = 52;
+  const blockHeight = lines.length * lineHeight + (author ? 40 : 0);
   let y = height / 2 - blockHeight / 2 + lineHeight / 2;
 
   for (const line of lines) {
-    // Soft glow once in the texture — no animated opacity later
     ctx.shadowColor = tint;
     ctx.shadowBlur = 28;
     ctx.fillStyle = tint;
@@ -80,11 +131,11 @@ function createWishTexture(message: string, author: string | null, tint: string)
   }
 
   if (author) {
-    ctx.font = "400 28px 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif";
+    ctx.font = "400 26px 'Be Vietnam Pro', 'Helvetica Neue', Arial, sans-serif";
     ctx.shadowColor = tint;
     ctx.shadowBlur = 12;
     ctx.fillStyle = "rgba(255, 236, 200, 0.92)";
-    ctx.fillText(`— ${author}`, width / 2, y + 8);
+    ctx.fillText(`— ${author}`, width / 2, y + 6);
   }
 
   const texture = new THREE.CanvasTexture(canvas);
@@ -192,7 +243,7 @@ export default function WishNode({
   return (
     <group ref={group} position={home.toArray()} renderOrder={index}>
       <mesh renderOrder={index}>
-        <planeGeometry args={[3.4, 1.42]} />
+        <planeGeometry args={[3.6, 1.8]} />
         <meshBasicMaterial
           ref={mat}
           map={texture}
