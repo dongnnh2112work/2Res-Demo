@@ -272,7 +272,7 @@ export default function DisplayClient({ secret }: DisplayClientProps) {
       )}
 
       <div className="display-chrome">
-        <p className="display-brand">2Res Demo</p>
+        <p className="display-brand">Wish Wall</p>
         <p className="display-meta">
           {wishes.length} lời chúc · {phase}
           {localMode ? " · local" : " · supabase"}

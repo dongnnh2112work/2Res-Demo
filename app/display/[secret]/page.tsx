@@ -8,7 +8,7 @@ type PageProps = {
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "LED Display — 2Res Demo",
+  title: "LED Display",
   robots: { index: false, follow: false },
 };
 

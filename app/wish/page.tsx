@@ -1,8 +1,8 @@
 import WishForm from "@/components/wish/WishForm";
 
 export const metadata = {
-  title: "Gửi lời chúc — 2Res Demo",
-  description: "Viết lời chúc gửi gắm đến sự kiện 2Res Demo",
+  title: "Gửi lời chúc",
+  description: "Viết lời chúc gửi gắm đến sự kiện",
 };
 
 export default function WishPage() {
@@ -11,7 +11,7 @@ export default function WishPage() {
       <div className="wish-atmosphere" aria-hidden />
       <div className="wish-shell">
         <header className="wish-brand">
-          <p className="wish-brand-name">2Res Demo</p>
+          <p className="wish-brand-name">Wish Wall</p>
           <h1 className="wish-headline">Gửi lời chúc</h1>
           <p className="wish-sub">
             Lời chúc của bạn sẽ hiện realtime trên màn hình chính.

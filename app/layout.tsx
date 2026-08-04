@@ -15,8 +15,8 @@ const sans = Be_Vietnam_Pro({
 });
 
 export const metadata: Metadata = {
-  title: "2Res Demo — Wish Wall",
-  description: "Keymoment lời chúc realtime cho sự kiện 2Res Demo",
+  title: "Wish Wall",
+  description: "Keymoment lời chúc realtime cho sự kiện",
 };
 
 export default function RootLayout({
